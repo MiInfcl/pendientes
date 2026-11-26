@@ -88,6 +88,15 @@ button { cursor: pointer; }
 .banda-in, .tablero { max-width: 640px; margin: 0 auto; padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right)); }
 .cabeza { display: flex; flex-direction: column; gap: 4px; }
 h1 { margin: 0; font-weight: 700; font-size: 32px; line-height: 1.05; letter-spacing: -.012em; }
+.volver {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 2px;
+  margin: -10px 0 -2px -6px; padding: 8px 10px 8px 2px; border-radius: 999px;
+  font-size: 14px; font-weight: 700; letter-spacing: .02em; color: var(--verde-tinta-2); text-decoration: none;
+  transition: color .18s ease, background-color .18s ease;
+}
+.volver .ic { width: 18px; height: 18px; transition: transform .18s ease; }
+.volver:hover { color: var(--verde-tinta); background: rgba(255, 255, 255, .1); }
+.volver:hover .ic { transform: translateX(-2px); }
 .cuenta { margin: 0; font-size: 16px; color: var(--verde-tinta-2); font-variant-numeric: tabular-nums; }
 .cuenta b { color: var(--verde-tinta); font-weight: 700; }
 

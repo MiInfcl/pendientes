@@ -559,7 +559,7 @@
   function iniciarNube() {
     const cfg = window.FIREBASE_CONFIG;
     if (!cfg) return;
-    import("./nube.js?v=6").then(m => {
+    import("./nube.js?v=7").then(m => {
       nube = m;
       mostrarAcceso();
       nube.iniciar(cfg, { alUsuario, alLista, alError });
