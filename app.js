@@ -126,8 +126,8 @@
     const pend = total - hechas;
     const c = $("#cuenta");
     if (!total) c.textContent = "Nada anotado";
-    else if (!pend) c.innerHTML = "<b>Todo hecho</b> · " + total + (total === 1 ? " tarea" : " tareas");
-    else c.innerHTML = "<b>" + hechas + "</b> de " + total + " hechas";
+    else if (!pend) c.innerHTML = "<b>Todo en su lugar</b> · " + total + (total === 1 ? " tarea hecha" : " tareas hechas");
+    else c.innerHTML = "<b>" + hechas + "</b> de " + total + " en su lugar";
     document.querySelectorAll(".filtro").forEach(b => b.setAttribute("aria-selected", String(b.dataset.f === estado.filtro)));
     $('[data-n="todas"]').textContent = total;
     $('[data-n="pendientes"]').textContent = pend;
