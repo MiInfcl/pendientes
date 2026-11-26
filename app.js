@@ -8,7 +8,7 @@
   const reduce = matchMedia("(prefers-reduced-motion: reduce)");
 
   /* ---------- estado y guardado ---------- */
-  let estado = { tareas: [], filtro: "todas" };
+  let estado = { tareas: [], filtro: "todas", uid: null };
   let puedeGuardar = true;
 
   function cargar() {
@@ -17,14 +17,23 @@
       if (!crudo) return;
       const d = JSON.parse(crudo);
       if (d && Array.isArray(d.tareas)) {
-        estado.tareas = d.tareas
-          .filter(t => t && typeof t.texto === "string")
-          .map(t => ({ id: String(t.id || nuevoId()), texto: t.texto.slice(0, 200), hecha: !!t.hecha, fecha: esFecha(t.fecha) ? t.fecha : "" }));
+        estado.tareas = normalizar(d.tareas);
       }
+      estado.uid = d && typeof d.uid === "string" ? d.uid : null;
       if (["todas", "pendientes", "hechas"].includes(d && d.filtro)) estado.filtro = d.filtro;
     } catch (e) { /* datos dañados o sin acceso: se parte de cero */ }
   }
+  function normalizar(lista) {
+    return lista
+      .filter(t => t && typeof t.texto === "string")
+      .map(t => ({ id: String(t.id || nuevoId()), texto: t.texto.slice(0, 200), hecha: !!t.hecha, fecha: esFecha(t.fecha) ? t.fecha : "" }));
+  }
+  // guarda en el navegador y, si hay cuenta, sube a la nube
   function guardar() {
+    guardarLocal();
+    if (sesion && nube) programarSubida();
+  }
+  function guardarLocal() {
     try {
       localStorage.setItem(CLAVE, JSON.stringify(estado));
       if (!puedeGuardar) { puedeGuardar = true; $("#aviso-guardado").hidden = true; }
@@ -268,6 +277,7 @@
       guardar();
     }
     pintar({ animar: false });
+    aplicarEntrante();
     const el = lista.querySelector(`[data-id="${id}"] .texto`);
     if (el) el.focus({ preventScroll: true });
   }
@@ -292,9 +302,11 @@
     toast(msg);
   }
 
-  function toast(msg) {
+  function toast(msg, { conDeshacer = true } = {}) {
     const el = $("#toast");
     $("#toast-t").textContent = msg;
+    $("#toast-deshacer").hidden = !conDeshacer;
+    if (!conDeshacer) deshacer = null;
     el.hidden = false;
     el.style.animation = "none"; void el.offsetWidth; el.style.animation = "";
     clearTimeout(timerToast);
@@ -418,17 +430,148 @@
       reordenarVisibles(ids);
     }
     pintar(); // las filas se deslizan desde donde quedaron
+    aplicarEntrante();
     const asa = lista.querySelector(`[data-id="${li.dataset.id}"] .asa`);
     if (asa) asa.focus({ preventScroll: true });
   }
   lista.addEventListener("pointerup", soltar);
   lista.addEventListener("pointercancel", soltar);
 
+  /* ---------- cuenta de Google (opcional) ---------- */
+  let nube = null, sesion = null, timerSubida = 0, sucio = false, entrante = null;
+
+  function textoSync(t, esperando) {
+    const p = $("#sync");
+    p.hidden = !t;
+    $("#sync-t").textContent = t || "";
+    p.classList.toggle("esperando", !!esperando);
+  }
+
+  function programarSubida() {
+    sucio = true;
+    textoSync(navigator.onLine ? "Guardando…" : "Sin conexión: se sube al volver", true);
+    clearTimeout(timerSubida);
+    timerSubida = setTimeout(subir, 400);
+  }
+  async function subir() {
+    clearTimeout(timerSubida);
+    if (!sesion || !nube) return;
+    const p = nube.guardar(estado.tareas);
+    sucio = false; // setDoc ya dejó la lista en la caché local; lo que llegue después la incluye
+    try { await p; textoSync("Guardado en tu cuenta"); }
+    catch (e) { textoSync("No se pudo guardar en tu cuenta"); console.warn(e); }
+  }
+
+  function aplicarEntrante() {
+    if (!entrante || editando || arr || sucio) return;
+    const nuevas = normalizar(entrante);
+    entrante = null;
+    if (JSON.stringify(nuevas) === JSON.stringify(estado.tareas)) return;
+    estado.tareas = nuevas;
+    guardarLocal();
+    pintar();
+  }
+
+  function mostrarAcceso() {
+    $("#acceso").hidden = false;
+    $("#entrar").hidden = !!sesion;
+    $("#avatar").hidden = !sesion;
+    if (!sesion) { cerrarMenu(); textoSync(""); return; }
+    const av = $("#avatar");
+    let img = av.querySelector("img");
+    if (sesion.foto) {
+      if (!img) { img = document.createElement("img"); img.alt = ""; img.referrerPolicy = "no-referrer"; av.prepend(img); }
+      img.src = sesion.foto;
+    } else if (img) img.remove();
+    $("#avatar-ini").textContent = sesion.foto ? "" : (sesion.nombre || sesion.email || "?").trim().charAt(0).toUpperCase();
+    $("#avatar").setAttribute("aria-label", "Tu cuenta: " + (sesion.email || sesion.nombre || ""));
+    $("#mc-nombre").textContent = sesion.nombre || "Tu cuenta";
+    $("#mc-correo").textContent = sesion.email || "";
+  }
+
+  async function alUsuario(u) {
+    if (!u) {
+      if (estado.uid) {
+        // al salir, la lista de la cuenta no se queda en este navegador
+        estado.uid = null; estado.tareas = []; entrante = null;
+        guardarLocal(); pintar();
+      }
+      sesion = null; mostrarAcceso();
+      return;
+    }
+    sesion = u; mostrarAcceso();
+    if (estado.uid === u.uid) { textoSync("Guardado en tu cuenta"); return; }
+    textoSync("Sincronizando…", true);
+    let remotas;
+    try { remotas = normalizar(await nube.leer() || []); }
+    catch (e) { console.warn(e); alError(e); return; }
+    const locales = estado.uid ? [] : estado.tareas; // si era de otra cuenta, no se mezcla
+    const ids = new Set(remotas.map(t => t.id));
+    const nuevas = locales.filter(t => !ids.has(t.id));
+    estado.tareas = [...nuevas, ...remotas];
+    estado.uid = u.uid;
+    guardarLocal(); pintar();
+    if (nuevas.length) {
+      await subir();
+      toast(nuevas.length === 1 ? "Subiste 1 tarea a tu cuenta" : "Subiste " + nuevas.length + " tareas a tu cuenta", { conDeshacer: false });
+    } else textoSync("Guardado en tu cuenta");
+  }
+
+  function alLista({ tareas, pendiente }) {
+    if (estado.uid !== (sesion && sesion.uid)) return; // todavía mezclando
+    if (tareas) { entrante = tareas; aplicarEntrante(); }
+    if (pendiente) textoSync(navigator.onLine ? "Guardando…" : "Sin conexión: se sube al volver", true);
+    else if (!sucio) textoSync("Guardado en tu cuenta");
+  }
+
+  function alError(e) {
+    console.warn(e);
+    textoSync(e && e.code === "permission-denied" ? "La cuenta todavía no acepta Pendientes" : "No se pudo sincronizar");
+  }
+
+  $("#entrar").addEventListener("click", async () => {
+    if (!nube) return;
+    const b = $("#entrar");
+    b.disabled = true;
+    try { await nube.entrar(); }
+    catch (e) {
+      const c = e && e.code;
+      if (c !== "auth/popup-closed-by-user" && c !== "auth/cancelled-popup-request") {
+        toast(c === "auth/unauthorized-domain" ? "Este sitio aún no está autorizado en la cuenta de Taller" : "No se pudo entrar con Google", { conDeshacer: false });
+        console.warn(e);
+      }
+    } finally { b.disabled = false; }
+  });
+
+  function abrirMenu() { $("#menu-cuenta").hidden = false; $("#avatar").setAttribute("aria-expanded", "true"); $("#cerrar-menu").focus(); }
+  function cerrarMenu() { $("#menu-cuenta").hidden = true; $("#avatar").setAttribute("aria-expanded", "false"); }
+  $("#avatar").addEventListener("click", () => { if ($("#menu-cuenta").hidden) abrirMenu(); else cerrarMenu(); });
+  $("#cerrar-menu").addEventListener("click", () => { cerrarMenu(); $("#avatar").focus(); });
+  $("#menu-cuenta").addEventListener("keydown", e => { if (e.key === "Escape") { cerrarMenu(); $("#avatar").focus(); } });
+  document.addEventListener("pointerdown", e => { if (!$("#menu-cuenta").hidden && !e.target.closest(".acceso")) cerrarMenu(); });
+  $("#salir").addEventListener("click", async () => {
+    cerrarMenu();
+    if (sucio) await subir();
+    try { await nube.salir(); } catch (e) { console.warn(e); }
+  });
+  addEventListener("online", () => { if (sesion && $("#sync-t").textContent.startsWith("Sin conexión")) textoSync("Guardando…", true); });
+
+  function iniciarNube() {
+    const cfg = window.FIREBASE_CONFIG;
+    if (!cfg) return;
+    import("./nube.js?v=5").then(m => {
+      nube = m;
+      mostrarAcceso();
+      nube.iniciar(cfg, { alUsuario, alLista, alError });
+    }).catch(e => console.warn("Sin cuenta: no cargó Firebase", e));
+  }
+
   /* ---------- inicio ---------- */
   cargar();
   try { localStorage.setItem(CLAVE + ".prueba", "1"); localStorage.removeItem(CLAVE + ".prueba"); }
   catch (e) { puedeGuardar = false; $("#aviso-guardado").hidden = false; }
   pintar({ animar: false });
+  iniciarNube();
 
   // al volver otro día, las fechas («Hoy», «Venció») se recalculan
   let diaVisto = hoyISO();
