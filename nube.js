@@ -10,6 +10,8 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 let auth, db, uid = null, unsub = null;
+// Sesión única de taller.ink (Worker en cuenta.taller.ink). Si no carga, la app sigue con su propia sesión.
+let sesion = null;
 const ref = () => doc(db, 'users', uid, 'pendientes', 'lista');
 const limpia = (t) => ({ id: String(t.id).slice(0, 40), texto: String(t.texto).slice(0, 200), hecha: !!t.hecha, fecha: t.fecha || '' });
 
@@ -17,6 +19,9 @@ export function iniciar(config, { alUsuario, alLista, alError }) {
   const app = initializeApp(config);
   auth = getAuth(app);
   auth.languageCode = 'es';
+  import('https://taller.ink/cuenta/sesion.js')
+    .then((m) => { sesion = m; m.conectarSesion(auth); })
+    .catch(() => {});
   db = initializeFirestore(app, { localCache: persistentLocalCache() });
   onAuthStateChanged(auth, async (u) => {
     if (unsub) { unsub(); unsub = null; }
@@ -48,7 +53,7 @@ export async function entrar() {
   }
 }
 
-export const salir = () => signOut(auth);
+export const salir = () => (sesion ? sesion.salir(auth) : signOut(auth));
 
 export async function leer() {
   if (!uid) return null;
